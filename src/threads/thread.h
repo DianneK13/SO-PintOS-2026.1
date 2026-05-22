@@ -150,7 +150,7 @@ void thread_recalculate_recent_cpu_for_all (void);
 void thread_increment_recent_cpu (void);
 
 int thread_get_load_avg (void);
-int thread_recalculate_load_avg (void);
+void thread_recalculate_load_avg (void);
 
 void thread_reorder_mlfq (void);
 //função que ordena a mlfq em ordem decrescente

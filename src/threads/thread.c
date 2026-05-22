@@ -436,11 +436,11 @@ thread_recalculate_priority(struct thread *t, void *aux) {
   // Faz o truncamento do coeficiente 1/4 para float
 
   float_type coef_recent_cpu_4 = FLOAT_DIV_FF(
-                                  FLOAT_FROM_INT(thread_get_recent_cpu()), 
+                                  FLOAT_FROM_INT(t->recent_cpu), 
                                   FLOAT_FROM_INT(4)
                                 );
 
-  t->priority = PRI_MAX - FLOAT_TO_INT_ROUND_ZERO(coef_recent_cpu_4) - (thread_get_nice() * 2);
+  t->priority = PRI_MAX - FLOAT_TO_INT_ROUND_ZERO(coef_recent_cpu_4) - (t->nice * 2);
 }
 
 void
@@ -502,25 +502,27 @@ thread_get_load_avg(void)
   return FLOAT_MULT_FI(load_avg, 100);
 }
 
-int
+void
 thread_recalculate_load_avg (void) 
 {
   // Coeficientes para calcular o load_avg e facilitar a leitura               // by Maria Clara
-  int old_avg           = thread_get_load_avg();
+
   float_type coef_59_60 = FLOAT_DIV_FF(FLOAT_FROM_INT(59), FLOAT_FROM_INT(60));
   float_type coef_1_60  = FLOAT_DIV_FF(FLOAT_FROM_INT(1), FLOAT_FROM_INT(60));
   /*como thread_recalculate_load_avg só será usada com thread_mlfq = 1, não podemos deixar ready_list como parâmetro
   pois estará desatualizada */
-  int ready_threads     = (int) list_size(&mlfq_list) + 1;                    
+  int ready_threads;
+  if(thread_current () != idle_thread)
+    ready_threads = (int) list_size(&mlfq_list) + 1;                    
+  else 
+    ready_threads = (int) list_size(&mlfq_list);
 
   // Recalcula o load_avg.                                                     // by Maria Clara
   // Obs: thread_get_load_avg fica responsável pelo (* 100)
   load_avg = FLOAT_ADD_FF(
-              FLOAT_MULT_FI(coef_59_60, old_avg),
+              FLOAT_MULT_FI(coef_59_60, load_avg),
               FLOAT_MULT_FI(coef_1_60, ready_threads)
             );
-
-  return FLOAT_TO_INT_ROUND_NEAREST(load_avg);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -534,12 +536,13 @@ void
 thread_recalculate_recent_cpu (struct thread *t, void *aux)  
 {
   int recent_cpu;
-  int load_avg = thread_get_load_avg();
-  int old_cpu  = thread_get_recent_cpu();
+  int old_cpu  = t->recent_cpu;
   int nice     = thread_get_nice();
 
-  float_type coef_load_avg_2        = FLOAT_FROM_INT(load_avg * 2);
-  float_type coef_load_avg_2_plus_1 = FLOAT_FROM_INT((load_avg * 2) + 1);
+  //float_type coef_load_avg_2        = FLOAT_FROM_INT(load_avg * 2);
+  float_type coef_load_avg_2 = FLOAT_MULT_FI(load_avg, 2);
+  //float_type coef_load_avg_2_plus_1 = FLOAT_FROM_INT((load_avg * 2) + 1);
+  float_type coef_load_avg_2_plus_1 = FLOAT_ADD_FI(FLOAT_MULT_FI(load_avg, 2), 1);
 
   recent_cpu = FLOAT_TO_INT_ROUND_NEAREST(FLOAT_ADD_FI(FLOAT_MULT_FI(FLOAT_DIV_FF(coef_load_avg_2, coef_load_avg_2_plus_1), old_cpu), nice));
   t->recent_cpu = recent_cpu;
@@ -556,8 +559,10 @@ thread_recalculate_recent_cpu_for_all (void)
 void
 thread_increment_recent_cpu (void)
 {
-  int new_cpu = (thread_current ()->recent_cpu) + 1;
-  thread_current ()-> recent_cpu = new_cpu;
+  if(thread_current () != idle_thread){
+    int new_cpu = (thread_current ()->recent_cpu) + 1;
+    thread_current ()-> recent_cpu = new_cpu;
+  }
 }
 
 

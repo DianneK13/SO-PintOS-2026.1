@@ -174,14 +174,14 @@ timer_interrupt (struct intr_frame *args UNUSED)
 
   thread_wakeup(); //verifica se há alguma thread dormindo que precisa ser acordada
 
-  if(ticks%100 == 0) {
+  thread_increment_recent_cpu(); //recent_cpu++ da running_threa a cada tick
+
+  if(ticks % TIMER_FREQ == 0) {
     thread_recalculate_load_avg();
     thread_recalculate_recent_cpu_for_all();
   } 
 
   if(ticks%4 == 0) thread_recalculate_priority_for_all(); //prioridade de todas as thread recalculada a cada 4 ticks
-  
-  thread_increment_recent_cpu(); //recent_cpu++ da running_threa a cada tick
 
   //thread_reorder_mlfq();
 }
