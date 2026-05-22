@@ -122,8 +122,8 @@ mlfq_more   (const struct list_elem *a,
              const struct list_elem *b,
              void *aux UNUSED)
 {
-  const struct thread *ta = list_entry(a, struct thread, blocked_elem);
-  const struct thread *tb = list_entry(b, struct thread, blocked_elem);
+  const struct thread *ta = list_entry(a, struct thread, elem);
+  const struct thread *tb = list_entry(b, struct thread, elem);
   return ta->priority >= tb->priority;
   // verifica se a tem prioridade maior que b
 }
@@ -288,6 +288,9 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  if(thread_get_priority() < priority)
+    thread_yield();
+
   return tid;
 }
 
@@ -325,7 +328,7 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   if(thread_mlfqs) {
-    list_push_front (&mlfq_list, &t->elem);
+    list_insert_ordered (&mlfq_list, &t->elem, mlfq_more, NULL);
   }
   else list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
@@ -399,7 +402,7 @@ thread_yield (void)
   old_level = intr_disable ();
   if (cur != idle_thread) {
     if(thread_mlfqs) {
-      list_push_front (&mlfq_list, &cur->elem);
+      list_insert_ordered (&mlfq_list, &cur->elem, mlfq_more, NULL);
     }
     else list_push_back (&ready_list, &cur->elem);
   }
@@ -454,7 +457,11 @@ thread_recalculate_priority_for_all (void)
 void
 thread_set_priority (int new_priority) 
 {
+  int p = thread_current ()-> priority;
   thread_current ()->priority = new_priority;
+
+  if(p > new_priority)
+    thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -472,7 +479,7 @@ thread_set_nice (int new_nice UNUSED)
   thread_recalculate_priority(thread_current(), NULL);
 
   if(!list_empty(&mlfq_list)){
-    struct thread* highest_priority_thread = list_entry(list_front(&mlfq_list), struct thread, allelem);
+    struct thread* highest_priority_thread = list_entry(list_front(&mlfq_list), struct thread, elem);
     if(thread_current()->priority < highest_priority_thread->priority) thread_yield();
   }
   /* 
@@ -549,7 +556,8 @@ thread_recalculate_recent_cpu_for_all (void)
 void
 thread_increment_recent_cpu (void)
 {
-  thread_current ()-> recent_cpu++;
+  int new_cpu = (thread_current ()->recent_cpu) + 1;
+  thread_current ()-> recent_cpu = new_cpu;
 }
 
 
