@@ -436,7 +436,7 @@ thread_recalculate_priority(struct thread *t, void *aux) {
   // Faz o truncamento do coeficiente 1/4 para float
 
   float_type coef_recent_cpu_4 = FLOAT_DIV_FF(
-                                  FLOAT_FROM_INT(t->recent_cpu), 
+                                  t->recent_cpu, 
                                   FLOAT_FROM_INT(4)
                                 );
 
@@ -499,7 +499,7 @@ thread_get_nice (void)
 int
 thread_get_load_avg(void)
 {
-  return FLOAT_MULT_FI(load_avg, 100);
+  return FLOAT_TO_INT_ROUND_NEAREST(FLOAT_MULT_FI(load_avg, 100));
 }
 
 void
@@ -520,7 +520,7 @@ thread_recalculate_load_avg (void)
   // Recalcula o load_avg.                                                     // by Maria Clara
   // Obs: thread_get_load_avg fica responsável pelo (* 100)
   load_avg = FLOAT_ADD_FF(
-              FLOAT_MULT_FI(coef_59_60, load_avg),
+              FLOAT_MULT_FF(coef_59_60, load_avg),
               FLOAT_MULT_FI(coef_1_60, ready_threads)
             );
 }
@@ -529,22 +529,22 @@ thread_recalculate_load_avg (void)
 int
 thread_get_recent_cpu(void)
 {
-  return FLOAT_MULT_FI(thread_current() ->recent_cpu, 100);
+  return FLOAT_TO_INT_ROUND_NEAREST(FLOAT_MULT_FI(thread_current() ->recent_cpu, 100));
 }
 
 void
 thread_recalculate_recent_cpu (struct thread *t, void *aux)  
 {
-  int recent_cpu;
-  int old_cpu  = t->recent_cpu;
-  int nice     = thread_get_nice();
+  float_type recent_cpu;
+  float_type old_cpu  = t->recent_cpu;
+  int nice            = t->nice;
 
   //float_type coef_load_avg_2        = FLOAT_FROM_INT(load_avg * 2);
   float_type coef_load_avg_2 = FLOAT_MULT_FI(load_avg, 2);
   //float_type coef_load_avg_2_plus_1 = FLOAT_FROM_INT((load_avg * 2) + 1);
   float_type coef_load_avg_2_plus_1 = FLOAT_ADD_FI(FLOAT_MULT_FI(load_avg, 2), 1);
 
-  recent_cpu = FLOAT_TO_INT_ROUND_NEAREST(FLOAT_ADD_FI(FLOAT_MULT_FI(FLOAT_DIV_FF(coef_load_avg_2, coef_load_avg_2_plus_1), old_cpu), nice));
+  recent_cpu = FLOAT_ADD_FI(FLOAT_MULT_FF(FLOAT_DIV_FF(coef_load_avg_2, coef_load_avg_2_plus_1), old_cpu), nice);
   t->recent_cpu = recent_cpu;
 }
 
@@ -560,7 +560,7 @@ void
 thread_increment_recent_cpu (void)
 {
   if(thread_current () != idle_thread){
-    int new_cpu = (thread_current ()->recent_cpu) + 1;
+    float_type new_cpu = FLOAT_ADD_FI(thread_current ()->recent_cpu, 1);
     thread_current ()-> recent_cpu = new_cpu;
   }
 }

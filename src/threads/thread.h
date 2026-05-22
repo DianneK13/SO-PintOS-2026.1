@@ -94,7 +94,7 @@ struct thread
     int64_t time_to_wake_up;            /* Instante, em ticks, quando a thread deve acordar
                                            (usado em thread_wakeup() para prevenir espera ocupada). */
     int nice;
-    int recent_cpu;
+    float_type recent_cpu;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
