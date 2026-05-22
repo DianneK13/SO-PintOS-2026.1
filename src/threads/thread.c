@@ -13,7 +13,10 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "lib/float.h"
 #endif
+
+float_type load_avg = 0;
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -27,6 +30,9 @@ static struct list ready_list;
 
 /* Lista de threads dormindo*/
 static struct list blocked_list;
+
+/* Multi level feedback queue*/
+static struct list mlfq_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -77,8 +83,8 @@ static tid_t allocate_tid (void);
 //função menor que pra ordenar a lista de threads bloqueadas
 static bool wakeup_less (const struct list_elem *a,
                          const struct list_elem *b,
-                         void *aux UNUSED);
-
+                         void *aux UNUSED);                         
+                         
 void
 thread_sleep(int64_t time_to_wakeup){
 
@@ -111,6 +117,17 @@ wakeup_less (const struct list_elem *a,
   // verificar quem tem o menor time_to_wake_up. Caso sejam iguais, verifica quem tem a maior pioridade.
 }
 
+static bool
+mlfq_more   (const struct list_elem *a,
+             const struct list_elem *b,
+             void *aux UNUSED)
+{
+  const struct thread *ta = list_entry(a, struct thread, blocked_elem);
+  const struct thread *tb = list_entry(b, struct thread, blocked_elem);
+  return ta->priority >= tb->priority;
+  // verifica se a tem prioridade maior que b
+}
+
 void 
 thread_wakeup()
 {
@@ -127,6 +144,15 @@ thread_wakeup()
     //se chegou aqui, significa que deu o tempo de acordar a primeira thread. Tira ela da lista e da unblock nela  
     list_pop_front(&blocked_list);
     thread_unblock(top_thread);
+  }
+}
+
+void
+thread_reorder_mlfq() {
+  if(thread_mlfqs) {
+    enum intr_level old_level = intr_disable();
+    list_sort (&mlfq_list, mlfq_more, NULL);
+    intr_set_level(old_level);
   }
 }
 
@@ -151,7 +177,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-  list_init(&blocked_list); //inicia a lista de threads bloqueadas que criamos
+  list_init (&blocked_list); //inicia a lista de threads bloqueadas que criamos
+  list_init (&mlfq_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -297,7 +324,10 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  if(thread_mlfqs) {
+    list_push_front (&mlfq_list, &t->elem);
+  }
+  else list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -367,8 +397,12 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread) {
+    if(thread_mlfqs) {
+      list_push_front (&mlfq_list, &cur->elem);
+    }
+    else list_push_back (&ready_list, &cur->elem);
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -391,6 +425,31 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
+void
+thread_recalculate_priority(struct thread *t, void *aux) {
+
+  // Thread priority is calculated initially at thread initialization.
+
+  // Faz o truncamento do coeficiente 1/4 para float
+
+  float_type coef_recent_cpu_4 = FLOAT_DIV_FF(
+                                  FLOAT_FROM_INT(thread_get_recent_cpu()), 
+                                  FLOAT_FROM_INT(4)
+                                );
+
+  t->priority = PRI_MAX - FLOAT_TO_INT_ROUND_ZERO(coef_recent_cpu_4) - (thread_get_nice() * 2);
+}
+
+void
+thread_recalculate_priority_for_all (void)
+{
+  if(thread_mlfqs){
+    enum intr_level old_level = intr_disable ();
+    thread_foreach(thread_recalculate_priority, NULL);
+    intr_set_level (old_level);
+  }
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) 
@@ -407,34 +466,92 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int new_nice UNUSED) 
 {
-  /* Not yet implemented. */
+  thread_current ()->nice = new_nice;
+  thread_recalculate_priority(thread_current(), NULL);
+
+  if(!list_empty(&mlfq_list)){
+    struct thread* highest_priority_thread = list_entry(list_front(&mlfq_list), struct thread, allelem);
+    if(thread_current()->priority < highest_priority_thread->priority) thread_yield();
+  }
+  /* 
+   * Compara a priority da thread atual com a thread que tá na primeira posição da MLfQ
+   * Aí, se a thread atual for menor, chama o yield, acredite.
+   */
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
-thread_get_load_avg (void) 
+thread_get_load_avg(void)
 {
-  /* Not yet implemented. */
-  return 0;
+  return FLOAT_MULT_FI(load_avg, 100);
+}
+
+int
+thread_recalculate_load_avg (void) 
+{
+  // Coeficientes para calcular o load_avg e facilitar a leitura               // by Maria Clara
+  int old_avg           = thread_get_load_avg();
+  float_type coef_59_60 = FLOAT_DIV_FF(FLOAT_FROM_INT(59), FLOAT_FROM_INT(60));
+  float_type coef_1_60  = FLOAT_DIV_FF(FLOAT_FROM_INT(1), FLOAT_FROM_INT(60));
+  /*como thread_recalculate_load_avg só será usada com thread_mlfq = 1, não podemos deixar ready_list como parâmetro
+  pois estará desatualizada */
+  int ready_threads     = (int) list_size(&mlfq_list) + 1;                    
+
+  // Recalcula o load_avg.                                                     // by Maria Clara
+  // Obs: thread_get_load_avg fica responsável pelo (* 100)
+  load_avg = FLOAT_ADD_FF(
+              FLOAT_MULT_FI(coef_59_60, old_avg),
+              FLOAT_MULT_FI(coef_1_60, ready_threads)
+            );
+
+  return FLOAT_TO_INT_ROUND_NEAREST(load_avg);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
-thread_get_recent_cpu (void) 
+thread_get_recent_cpu(void)
 {
-  /* Not yet implemented. */
-  return 0;
+  return FLOAT_MULT_FI(thread_current() ->recent_cpu, 100);
 }
+
+void
+thread_recalculate_recent_cpu (struct thread *t, void *aux)  
+{
+  int recent_cpu;
+  int load_avg = thread_get_load_avg();
+  int old_cpu  = thread_get_recent_cpu();
+  int nice     = thread_get_nice();
+
+  float_type coef_load_avg_2        = FLOAT_FROM_INT(load_avg * 2);
+  float_type coef_load_avg_2_plus_1 = FLOAT_FROM_INT((load_avg * 2) + 1);
+
+  recent_cpu = FLOAT_TO_INT_ROUND_NEAREST(FLOAT_ADD_FI(FLOAT_MULT_FI(FLOAT_DIV_FF(coef_load_avg_2, coef_load_avg_2_plus_1), old_cpu), nice));
+  t->recent_cpu = recent_cpu;
+}
+
+void
+thread_recalculate_recent_cpu_for_all (void)
+{
+  enum intr_level old_level = intr_disable ();
+  thread_foreach(thread_recalculate_recent_cpu, NULL);
+  intr_set_level (old_level);
+}
+
+void
+thread_increment_recent_cpu (void)
+{
+  thread_current ()-> recent_cpu++;
+}
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -522,6 +639,8 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->nice = 0;
+  t->recent_cpu = 0;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
@@ -549,11 +668,18 @@ alloc_frame (struct thread *t, size_t size)
    idle_thread. */
 static struct thread *
 next_thread_to_run (void) 
-{
-  if (list_empty (&ready_list))
-    return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+{ 
+  if(thread_mlfqs) {
+    if (list_empty (&mlfq_list))
+      return idle_thread;
+    else
+      return list_entry (list_pop_front (&mlfq_list), struct thread, elem);
+  }else {
+    if (list_empty (&ready_list))
+      return idle_thread;
+    else
+      return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
