@@ -233,6 +233,10 @@ lock_release (struct lock *lock)
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+
+  if(thread_mlfqs && !intr_context()) {
+    thread_yield();
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false

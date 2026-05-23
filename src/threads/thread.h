@@ -154,7 +154,7 @@ void thread_recalculate_load_avg (void);
 
 void thread_reorder_mlfq (void);
 //função que ordena a mlfq em ordem decrescente
-bool mflq_more   (const struct list_elem *a,
+bool mlfq_more   (const struct list_elem *a,
                   const struct list_elem *b,
                   void *aux UNUSED);
 

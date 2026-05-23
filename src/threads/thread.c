@@ -117,7 +117,7 @@ wakeup_less (const struct list_elem *a,
   // verificar quem tem o menor time_to_wake_up. Caso sejam iguais, verifica quem tem a maior pioridade.
 }
 
-static bool
+bool
 mlfq_more   (const struct list_elem *a,
              const struct list_elem *b,
              void *aux UNUSED)
