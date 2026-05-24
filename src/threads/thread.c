@@ -16,6 +16,7 @@
 #include "lib/float.h"
 #endif
 
+// Como load_avg vale para todo sistema, ele é definido como uma variável global que inicia em 0.
 float_type load_avg = 0;
 
 /* Random value for struct thread's `magic' member.
@@ -117,6 +118,7 @@ wakeup_less (const struct list_elem *a,
   // verificar quem tem o menor time_to_wake_up. Caso sejam iguais, verifica quem tem a maior pioridade.
 }
 
+// verifica se a tem prioridade maior que b
 bool
 mlfq_more   (const struct list_elem *a,
              const struct list_elem *b,
@@ -125,7 +127,6 @@ mlfq_more   (const struct list_elem *a,
   const struct thread *ta = list_entry(a, struct thread, elem);
   const struct thread *tb = list_entry(b, struct thread, elem);
   return ta->priority >= tb->priority;
-  // verifica se a tem prioridade maior que b
 }
 
 void 
@@ -169,7 +170,7 @@ thread_init (void)
   list_init (&ready_list);
   list_init (&all_list);
   list_init (&blocked_list); //inicia a lista de threads bloqueadas que criamos
-  list_init (&mlfq_list);
+  list_init (&mlfq_list);    //inicia a mlfq
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -279,6 +280,9 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+/* Se a thread atual tiver prioridade menor que a thread que
+   acabou de ser criada, thread_yield deve ser chamado,
+   pois a thread criada deve passar a rodar.*/
   if(thread_get_priority() < priority)
     thread_yield();
 
@@ -318,6 +322,8 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
+
+// Para todos os testes de mlfq (thread_mlfqs == 1), a mlfq_list substituirá a ready list
   if(thread_mlfqs) {
     list_insert_ordered (&mlfq_list, &t->elem, mlfq_more, NULL);
   }
@@ -392,6 +398,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) {
+    // Para todos os testes de mlfq (thread_mlfqs == 1), a mlfq_list substituirá a ready list
     if(thread_mlfqs) {
       list_insert_ordered (&mlfq_list, &cur->elem, mlfq_more, NULL);
     }
@@ -419,13 +426,10 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
+/* Calcula a prioridade da thread t, cuja fórmula está na documentação. */
 void
-thread_recalculate_priority(struct thread *t, void *aux) {
-
-  // Thread priority is calculated initially at thread initialization.
-
-  // Faz o truncamento do coeficiente 1/4 para float
-
+thread_recalculate_priority(struct thread *t, void *aux) 
+{
   float_type coef_recent_cpu_4 = FLOAT_DIV_FF(
                                   t->recent_cpu, 
                                   FLOAT_FROM_INT(4)
@@ -434,6 +438,7 @@ thread_recalculate_priority(struct thread *t, void *aux) {
   t->priority = PRI_MAX - FLOAT_TO_INT_ROUND_ZERO(coef_recent_cpu_4) - (t->nice * 2);
 }
 
+/* Calcula a prioridade para todas as threads caso o teste a ser rodado seja de mlfq. */
 void
 thread_recalculate_priority_for_all (void)
 {
@@ -451,6 +456,7 @@ thread_set_priority (int new_priority)
   int p = thread_current ()-> priority;
   thread_current ()->priority = new_priority;
 
+  //Caso a nova prioridade seja menor que a antiga, averiguar possível preempção.
   if(p > new_priority)
     thread_yield();
 }
@@ -467,16 +473,15 @@ void
 thread_set_nice (int new_nice UNUSED) 
 {
   thread_current ()->nice = new_nice;
+  //Como o nice da thread mudou, sua prioridade deve ser recalculada.
   thread_recalculate_priority(thread_current(), NULL);
 
+  /* Compara a priority da thread atual com a thread que tá na primeira posição da MLfQ
+     Se a prioridade da thread atual for menor, yield deve ser chamado. */
   if(!list_empty(&mlfq_list)){
     struct thread* highest_priority_thread = list_entry(list_front(&mlfq_list), struct thread, elem);
     if(thread_current()->priority < highest_priority_thread->priority) thread_yield();
   }
-  /* 
-   * Compara a priority da thread atual com a thread que tá na primeira posição da MLfQ
-   * Aí, se a thread atual for menor, chama o yield, acredite.
-   */
 }
 
 /* Returns the current thread's nice value. */
@@ -493,23 +498,23 @@ thread_get_load_avg(void)
   return FLOAT_TO_INT_ROUND_NEAREST(FLOAT_MULT_FI(load_avg, 100));
 }
 
+// Calcula load_avg para o sistema
 void
 thread_recalculate_load_avg (void) 
 {
-  // Coeficientes para calcular o load_avg e facilitar a leitura               // by Maria Clara
-
   float_type coef_59_60 = FLOAT_DIV_FF(FLOAT_FROM_INT(59), FLOAT_FROM_INT(60));
   float_type coef_1_60  = FLOAT_DIV_FF(FLOAT_FROM_INT(1), FLOAT_FROM_INT(60));
-  /*como thread_recalculate_load_avg só será usada com thread_mlfq = 1, não podemos deixar ready_list como parâmetro
-  pois estará desatualizada */
+
+  //ready_threads é a quantidade de threads em estado running ou ready, excluindo idle_thread.
   int ready_threads;
+
+  /* como thread_recalculate_load_avg só será usada com thread_mlfq = 1, 
+    não podemos deixar ready_list como parâmetro pois estará desatualizada */
   if(thread_current () != idle_thread)
-    ready_threads = (int) list_size(&mlfq_list) + 1;                    
+    ready_threads = (int) list_size(&mlfq_list) + 1;
   else 
     ready_threads = (int) list_size(&mlfq_list);
 
-  // Recalcula o load_avg.                                                     // by Maria Clara
-  // Obs: thread_get_load_avg fica responsável pelo (* 100)
   load_avg = FLOAT_ADD_FF(
               FLOAT_MULT_FF(coef_59_60, load_avg),
               FLOAT_MULT_FI(coef_1_60, ready_threads)
@@ -523,6 +528,7 @@ thread_get_recent_cpu(void)
   return FLOAT_TO_INT_ROUND_NEAREST(FLOAT_MULT_FI(thread_current() ->recent_cpu, 100));
 }
 
+// Calcula recent_cpu para a thread t.
 void
 thread_recalculate_recent_cpu (struct thread *t, void *aux)  
 {
@@ -530,15 +536,14 @@ thread_recalculate_recent_cpu (struct thread *t, void *aux)
   float_type old_cpu  = t->recent_cpu;
   int nice            = t->nice;
 
-  //float_type coef_load_avg_2        = FLOAT_FROM_INT(load_avg * 2);
   float_type coef_load_avg_2 = FLOAT_MULT_FI(load_avg, 2);
-  //float_type coef_load_avg_2_plus_1 = FLOAT_FROM_INT((load_avg * 2) + 1);
   float_type coef_load_avg_2_plus_1 = FLOAT_ADD_FI(FLOAT_MULT_FI(load_avg, 2), 1);
 
   recent_cpu = FLOAT_ADD_FI(FLOAT_MULT_FF(FLOAT_DIV_FF(coef_load_avg_2, coef_load_avg_2_plus_1), old_cpu), nice);
   t->recent_cpu = recent_cpu;
 }
 
+// Calcula recent_cpu para todas as threads do sistema
 void
 thread_recalculate_recent_cpu_for_all (void)
 {
@@ -547,6 +552,7 @@ thread_recalculate_recent_cpu_for_all (void)
   intr_set_level (old_level);
 }
 
+//recent_cpu++ da running_thread a cada tick
 void
 thread_increment_recent_cpu (void)
 {
@@ -673,6 +679,7 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 { 
+  // Para todos os testes de mlfq (thread_mlfqs == 1), a mlfq_list substituirá a ready list
   if(thread_mlfqs) {
     if (list_empty (&mlfq_list))
       return idle_thread;
