@@ -234,6 +234,7 @@ lock_release (struct lock *lock)
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 
+  //ADICIONAR EXPLICACÃO AQUI!!!!!!!
   if(thread_mlfqs && !intr_context()) {
     thread_yield();
   }

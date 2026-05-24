@@ -147,15 +147,6 @@ thread_wakeup()
   }
 }
 
-void
-thread_reorder_mlfq() {
-  if(thread_mlfqs) {
-    enum intr_level old_level = intr_disable();
-    list_sort (&mlfq_list, mlfq_more, NULL);
-    intr_set_level(old_level);
-  }
-}
-
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
