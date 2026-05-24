@@ -7,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "lib/float.h"
 
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -172,6 +173,16 @@ timer_interrupt (struct intr_frame *args UNUSED)
   thread_tick ();
 
   thread_wakeup(); //verifica se há alguma thread dormindo que precisa ser acordada
+
+  thread_increment_recent_cpu(); //recent_cpu++ da running_thread a cada tick
+
+  //A cada segundo, load_avg é recalculado, bem como recent_cpu para todas as threads
+  if(ticks % TIMER_FREQ == 0) {
+    thread_recalculate_load_avg();
+    thread_recalculate_recent_cpu_for_all();
+  } 
+
+  if(ticks%4 == 0) thread_recalculate_priority_for_all(); //prioridade de todas as thread recalculada a cada 4 ticks
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

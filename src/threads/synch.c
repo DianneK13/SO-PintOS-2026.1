@@ -233,6 +233,15 @@ lock_release (struct lock *lock)
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+
+  /* Caso uma thread dormindo seja acordada e ela tenha maior prioridade que a thread que está
+     rodando, thread_yield deve ser chamado para que aquela passe a rodar. Enquanto threads estão 
+     dormindo, seu recent_cpu diminui, aumentando a prioridade. É importante que thread_yield não
+     seja chamado durante intr_context, pois interrupções de hardware não salvam o contexto das
+     threads. */
+  if(thread_mlfqs && !intr_context()) {
+    thread_yield();
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "lib/float.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -92,6 +93,8 @@ struct thread
     struct list_elem blocked_elem;      /* Elemento da lista para a lista de threads bloqueadas */
     int64_t time_to_wake_up;            /* Instante, em ticks, quando a thread deve acordar
                                            (usado em thread_wakeup() para prevenir espera ocupada). */
+    int nice;
+    float_type recent_cpu;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -133,12 +136,32 @@ void thread_yield (void);
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
 
+/* Segue abaixo as funções necessárias para o funcionamento da MLFQ.
+   Explicações mais detalhadas de cada uma das funções constam em thread.c. */
+
+//Funções de priority
 int thread_get_priority (void);
 void thread_set_priority (int);
+void thread_recalculate_priority(struct thread *t, void *aux);
+void thread_recalculate_priority_for_all (void);
 
+//Funções de nice
 int thread_get_nice (void);
 void thread_set_nice (int);
-int thread_get_recent_cpu (void);
-int thread_get_load_avg (void);
 
+//Funções de recent_cpu
+int thread_get_recent_cpu (void);
+void thread_recalculate_recent_cpu (struct thread *t, void *aux);
+void thread_recalculate_recent_cpu_for_all (void);
+void thread_increment_recent_cpu (void);
+
+//Funções de load_avg
+int thread_get_load_avg (void);
+void thread_recalculate_load_avg (void);
+
+//função que ordena a mlfq em ordem decrescente
+bool mlfq_more   (const struct list_elem *a,
+                  const struct list_elem *b,
+                  void *aux UNUSED);
+                  
 #endif /* threads/thread.h */
